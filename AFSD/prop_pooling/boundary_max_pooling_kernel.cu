@@ -1,5 +1,8 @@
 #include <ATen/ATen.h>
 #include <THC/THCAtomics.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <cuda.h>
+#include <cuda_runtime_api.h>
 
 #define CUDA_1D_KERNEL_LOOP(i, n)                            \
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; \
@@ -107,7 +110,7 @@ int boundary_max_pooling_cuda_forward(
             seg_num);
     }));
 
-    THCudaCheck(cudaGetLastError());
+    C10_CUDA_CHECK(cudaGetLastError());
     return 1;
 }
 
@@ -140,6 +143,6 @@ int boundary_max_pooling_cuda_backward(
             seg_num);
     }));
 
-    THCudaCheck(cudaGetLastError());
+    C10_CUDA_CHECK(cudaGetLastError());
     return 1;
 }

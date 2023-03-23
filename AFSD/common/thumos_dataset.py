@@ -140,8 +140,19 @@ def load_video_data(video_infos, npy_data_path):
     return data_dict
 
 
+def load_audio_data(video_infos, npy_data_path):
+    print('loading audio data ...')
+    data_dict = {}
+    for video_name in tqdm.tqdm(list(video_infos.keys()), ncols=0):
+        data = np.load(os.path.join(npy_data_path, video_name + '.npy'))
+        data = np.transpose(data, [1, 0])
+        data_dict[video_name] = data
+    return data_dict
+
+
 class THUMOS_Dataset(Dataset):
-    def __init__(self, data_dict,
+    def __init__(self, video_data_dict,
+                 audio_data_dict,
                  video_infos,
                  video_annos,
                  clip_length=config['dataset']['training']['clip_length'],
@@ -157,7 +168,8 @@ class THUMOS_Dataset(Dataset):
             stride
         )
         # np.random.shuffle(self.training_list)
-        self.data_dict = data_dict
+        self.video_data_dict = video_data_dict
+        self.audio_data_dict = audio_data_dict
         self.clip_length = clip_length
         self.crop_size = crop_size
         self.random_crop = videotransforms.RandomCrop(crop_size)
@@ -214,18 +226,11 @@ class THUMOS_Dataset(Dataset):
             new_input[:, t + th:end_idx, ] = input[:, t:start_idx, ]
 
             new_annos = [[gt[0], t], [t + th, th + gt[1]], [t + 1, t + th - 1]]
-            # new_annos = [[t-math.ceil(th/5), t+math.ceil(th/5)],
-            #            [t+th-math.ceil(th/5), t+th+math.ceil(th/5)],
-            #            [t+1, t+th-1]]
-
         else:
             new_input[:, start_idx:t - th] = input[:, end_idx:t, ]
             new_input[:, t - th:t, ] = input[:, start_idx:end_idx, ]
 
             new_annos = [[gt[0] - th, t - th], [t, gt[1]], [t - th + 1, t - 1]]
-            # new_annos = [[t-th-math.ceil(th/5), t-th+math.ceil(th/5)],
-            #            [t-math.ceil(th/5), t+math.ceil(th/5)],
-            #            [t-th+1, t-1]]
 
         return new_input, new_annos, True
 
@@ -238,31 +243,48 @@ class THUMOS_Dataset(Dataset):
         return new_input, new_annos, flag
 
     def __getitem__(self, idx):
+
         sample_info = self.training_list[idx]
-        video_data = self.data_dict[sample_info['video_name']]
+        video_data = self.video_data_dict[sample_info['video_name']]
+        print(sample_info['video_name'])
+        audio_data = self.audio_data_dict[sample_info['video_name']]
+        # T x F
         offset = sample_info['offset']
         annos = sample_info['annos']
         th = self.th[sample_info['video_name']]
 
-        input_data = video_data[:, offset: offset + self.clip_length]
-        c, t, h, w = input_data.shape
+        input_video_data = video_data[:, offset: offset + self.clip_length]
+        input_audio_data = audio_data[:, offset: offset + self.clip_length]
+        c, t, h, w = input_video_data.shape
+        at, af = input_audio_data.shape
         if t < self.clip_length:
             # padding t to clip_length
             pad_t = self.clip_length - t
-            zero_clip = np.zeros([c, pad_t, h, w], input_data.dtype)
-            input_data = np.concatenate([input_data, zero_clip], 1)
+            zero_clip = np.zeros([c, pad_t, h, w], input_video_data.dtype)
+            input_video_data = np.concatenate([input_video_data, zero_clip], 1)
+
+        if at < self.clip_length:
+            pad_t = self.clip_length - t
+            zero_clip = np.zeros([at, pad_t], input_audio_data.dtype)
+            input_audio_data = np.concatenate([input_audio_data, zero_clip], 1)
 
         # random crop and flip
         if self.training:
-            input_data = self.random_flip(self.random_crop(input_data))
+            input_video_data = self.random_flip(self.random_crop(input_video_data))
         else:
-            input_data = self.center_crop(input_data)
+            input_video_data = self.center_crop(input_video_data)
 
         # import pdb;pdb.set_trace()
-        input_data = torch.from_numpy(input_data).float()
+        input_video_data = torch.from_numpy(input_video_data).float()
+        input_audio_data = np.asarray(input_audio_data,'float32')
+        input_audio_data = torch.from_numpy(input_audio_data).float()
+
         if self.rgb_norm:
-            input_data = (input_data / 255.0) * 2.0 - 1.0
-        ssl_input_data, ssl_annos, flag = self.augment(input_data, annos, th, 1)
+            input_video_data = (input_video_data / 255.0) * 2.0 - 1.0
+
+        ssl_input_data, ssl_annos, flag = self.augment(input_video_data, annos, th, 1)
+        #待定，可能要改
+        # ssl_input_data, ssl_annos, flag = self.augment(input_video_data, annos, th, 1)
         annos = annos_transform(annos, self.clip_length)
         target = np.stack(annos, 0)
         ssl_target = np.stack(ssl_annos, 0)
@@ -273,24 +295,26 @@ class THUMOS_Dataset(Dataset):
         ], axis=0)
         scores = torch.from_numpy(scores.copy()).float()
 
-        return input_data, target, scores, ssl_input_data, ssl_target, flag
+        return input_video_data, input_audio_data,target, scores, ssl_input_data, ssl_target, flag
 
 
 def detection_collate(batch):
     targets = []
-    clips = []
+    video_clips = []
+    audio_clips = []
     scores = []
 
     ssl_targets = []
     ssl_clips = []
     flags = []
     for sample in batch:
-        clips.append(sample[0])
-        targets.append(torch.FloatTensor(sample[1]))
-        scores.append(sample[2])
+        video_clips.append(sample[0])
+        audio_clips.append(sample[1])
+        targets.append(torch.FloatTensor(sample[2]))
+        scores.append(sample[3])
 
-        ssl_clips.append(sample[3])
-        ssl_targets.append(torch.FloatTensor(sample[4]))
-        flags.append(sample[5])
-    return torch.stack(clips, 0), targets, torch.stack(scores, 0), \
-           torch.stack(ssl_clips, 0), ssl_targets, flags
+        ssl_clips.append(sample[4])
+        ssl_targets.append(torch.FloatTensor(sample[5]))
+        flags.append(sample[6])
+    return torch.stack(video_clips, 0),torch.stack(audio_clips, 0), targets, torch.stack(scores, 0), \
+        torch.stack(ssl_clips, 0), ssl_targets, flags

@@ -2,6 +2,7 @@ dataset:
   num_classes: 21
   training:
     video_mp4_path: ./datasets/thumos14/validation/
+    audio_data_path: ./datasets/thumos14/Audio_feat_numpy/
     video_info_path: thumos_annotations/val_video_info.csv
     video_anno_path: thumos_annotations/val_Annotation_ours.csv
     video_data_path: ./datasets/thumos14/validation_npy/
@@ -30,7 +31,7 @@ training:
   max_epoch: 16
   focal_loss: true
   checkpoint_path: ./models/thumos14/
-  random_seed: 2020
+  random_seed: 2022
 
 testing:
   conf_thresh: 0.01

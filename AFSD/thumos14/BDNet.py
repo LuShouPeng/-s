@@ -29,7 +29,7 @@ class I3D_BackBone(nn.Module):
         self._freeze_bn = freeze_bn
         self._freeze_bn_affine = freeze_bn_affine
 
-    def load_pretrained_weight(self, model_path='models/i3d_models/rgb_imagenet.pt'):
+    def load_pretrained_weight(self, model_path=r'models/i3d_models/rgb_imagenet.pt'):
         self._model.load_state_dict(torch.load(model_path), strict=False)
 
     def train(self, mode=True):
@@ -117,6 +117,31 @@ class CoarsePyramid(nn.Module):
         self.loc_heads = nn.ModuleList()
         self.frame_num = frame_num
         self.layer_num = layer_num
+
+        self.U_v = nn.Sequential(
+            nn.Linear(64, 512),
+            nn.Tanh(),
+            nn.Linear(512, 64),
+        )
+
+        self.U_a = nn.Sequential(
+            nn.Linear(64, 512),
+            nn.Tanh(),
+            nn.Linear(512, 64),
+        )
+
+        self.U_v2 = nn.Sequential(
+            nn.Linear(32, 512),
+            nn.Tanh(),
+            nn.Linear(512, 32),
+        )
+
+        self.U_a2 = nn.Sequential(
+            nn.Linear(32, 512),
+            nn.Tanh(),
+            nn.Linear(512, 32),
+        )
+
         self.pyramids.append(nn.Sequential(
             Unit3D(
                 in_channels=feat_channels[0],
@@ -256,7 +281,60 @@ class CoarsePyramid(nn.Module):
             )
             t = t // 2
 
-    def forward(self, feat_dict, ssl=False):
+        self.audio_conv2 = self.audio_conv = nn.Sequential(
+            nn.Conv1d(in_channels=64, out_channels=64, kernel_size=3),
+            nn.MaxPool1d(kernel_size=2),
+            nn.GroupNorm(8, 32),
+            nn.ReLU(inplace=True)
+        )
+
+        self.audio_conv = nn.Sequential(
+            nn.Conv1d(in_channels=128, out_channels=128, kernel_size=3, padding=1),
+            nn.MaxPool1d(kernel_size=4),
+            nn.GroupNorm(8, 64),
+            nn.ReLU(inplace=True)
+
+        )
+
+        self.audio_tconv = nn.Sequential(
+            nn.Conv1d(in_channels=256, out_channels=64, kernel_size=1),
+            nn.GroupNorm(8, 64),
+            nn.ReLU(inplace=True)
+        )
+
+    def TBMRF_block(self, audio, video, nb_block, type):
+        if (type == 1):
+            for i in range(nb_block):
+                video_residual = video
+                v = self.U_v(video)
+                audio_residual = audio
+                a = self.U_a(audio)
+                merged = torch.mul(v + a, 0.5)
+
+                a_trans = audio_residual
+                v_trans = video_residual
+
+                video = nn.Tanh()(a_trans + merged)
+                audio = nn.Tanh()(v_trans + merged)
+
+            return torch.mul(video + audio, 0.5)
+        else:
+            for i in range(nb_block):
+                video_residual = video
+                v = self.U_v2(video)
+                audio_residual = audio
+                a = self.U_a2(audio)
+                merged = torch.mul(v + a, 0.5)
+
+                a_trans = audio_residual
+                v_trans = video_residual
+
+                video = nn.Tanh()(a_trans + merged)
+                audio = nn.Tanh()(v_trans + merged)
+
+            return torch.mul(video + audio, 0.5)
+
+    def forward(self, feat_dict, audio_features, ssl=False):
         pyramid_feats = []
         locs = []
         confs = []
@@ -264,22 +342,65 @@ class CoarsePyramid(nn.Module):
         prop_locs = []
         prop_confs = []
         trip = []
+        # x2(1,1024,32,3,3)
         x2 = feat_dict['Mixed_5c']
+        # x2 = self.TBMRF_block(audio_features,x2,1)
+        # x1(1,832,64,6, 6)
         x1 = feat_dict['Mixed_4f']
+        # x1  = self.TBMRF_block(audio_features,x1,1)
+        cat_method = "Learnable"
         batch_num = x1.size(0)
-        for i, conv in enumerate(self.pyramids):
-            if i == 0:
-                x = conv(x1)
-                x = x.squeeze(-1).squeeze(-1)
-            elif i == 1:
-                x = conv(x2)
-                x = x.squeeze(-1).squeeze(-1)
-                x0 = pyramid_feats[-1]
-                y = F.interpolate(x, x0.size()[2:], mode='nearest')
-                pyramid_feats[-1] = x0 + y
-            else:
-                x = conv(x)
-            pyramid_feats.append(x)
+        audio_features = audio_features[:, :, :256]
+
+        if (cat_method == "Learnable"):
+            for i, conv in enumerate(self.pyramids):
+                if i == 0:
+                    x = conv(x1)
+                    x = x.squeeze(-1).squeeze(-1)
+                    # x (1,512,64)
+                    audioF = torch.zeros(x.shape[0], x.shape[1], 64).cuda()
+                    audio_features = self.audio_conv(audio_features.permute(0, 2, 1))
+                    audioF[:, :128, :] = audio_features.permute(0, 2, 1).unsqueeze(0)
+                    # audioF (1,512,64)
+                    x = self.TBMRF_block(audioF, x, 1, 1)
+                elif i == 1:
+                    x = conv(x2)
+                    x = x.squeeze(-1).squeeze(-1)
+                    audioF = torch.zeros(x.shape[0], x.shape[1], 32).cuda()
+                    audio_features = self.audio_conv2(audio_features)
+                    audioF[:, :128, :] = audio_features.permute(0, 2, 1).unsqueeze(0)
+                    x = self.TBMRF_block(audioF, x, 1, 2)
+                    x0 = pyramid_feats[-1]
+                    y = F.interpolate(x, x0.size()[2:], mode='nearest')
+                    pyramid_feats[-1] = x0 + y
+                else:
+                    x = conv(x)
+                pyramid_feats.append(x)
+
+        elif cat_method == "simplecatplusPCA":
+            for i, conv in enumerate(self.pyramids):
+                if i == 0:
+                    x = conv(x1)
+                    x = x.squeeze(-1).squeeze(-1)
+                    # x (1,512,64)
+                    audioF = torch.zeros(x.shape[0], x.shape[1], 64).cuda()
+                    audio_features = self.audio_tconv(audio_features.permute(0, 2, 1))
+                    audioF[:, :128, :] = audio_features.permute(0, 2, 1).unsqueeze(0)
+                    # audioF (1,512,256)
+                    x = self.TBMRF_block(audioF, x, 1, 1)
+                elif i == 1:
+                    x = conv(x2)
+                    x = x.squeeze(-1).squeeze(-1)
+                    audioF = torch.zeros(x.shape[0], x.shape[1], 32).cuda()
+                    audio_features = self.audio_conv2(audio_features)
+                    audioF[:, :128, :] = audio_features.permute(0, 2, 1).unsqueeze(0)
+                    x = self.TBMRF_block(audioF, x, 1, 2)
+                    x0 = pyramid_feats[-1]
+                    y = F.interpolate(x, x0.size()[2:], mode='nearest')
+                    pyramid_feats[-1] = x0 + y
+                else:
+                    x = conv(x)
+                pyramid_feats.append(x)
 
         frame_level_feat = pyramid_feats[0].unsqueeze(-1)
         frame_level_feat = F.interpolate(frame_level_feat, [self.frame_num, 1]).squeeze(-1)
@@ -293,15 +414,14 @@ class CoarsePyramid(nn.Module):
         for i, feat in enumerate(pyramid_feats):
             loc_feat = self.loc_tower(feat)
             conf_feat = self.conf_tower(feat)
-
             locs.append(
                 self.loc_heads[i](self.loc_head(loc_feat))
-                    .view(batch_num, 2, -1)
-                    .permute(0, 2, 1).contiguous()
+                .view(batch_num, 2, -1)
+                .permute(0, 2, 1).contiguous()
             )
             confs.append(
                 self.conf_head(conf_feat).view(batch_num, num_classes, -1)
-                    .permute(0, 2, 1).contiguous()
+                .permute(0, 2, 1).contiguous()
             )
             t = feat.size(2)
             with torch.no_grad():
@@ -354,7 +474,7 @@ class CoarsePyramid(nn.Module):
                               .permute(0, 2, 1).contiguous())
             centers.append(
                 self.center_head(loc_prop_feat).view(batch_num, 1, -1)
-                    .permute(0, 2, 1).contiguous()
+                .permute(0, 2, 1).contiguous()
             )
 
         loc = torch.cat([o.view(batch_num, -1, 2) for o in locs], 1)
@@ -364,7 +484,7 @@ class CoarsePyramid(nn.Module):
         center = torch.cat([o.view(batch_num, -1, 1) for o in centers], 1)
         priors = torch.cat(self.priors, 0).to(loc.device).unsqueeze(0)
         return loc, conf, prop_loc, prop_conf, center, priors, start, end, \
-               start_loc_prop, end_loc_prop, start_conf_prop, end_conf_prop
+            start_loc_prop, end_loc_prop, start_conf_prop, end_conf_prop
 
 
 class BDNet(nn.Module):
@@ -404,9 +524,10 @@ class BDNet(nn.Module):
         for i, m in enumerate(self.modules()):
             self.weight_init(m)
 
-    def forward(self, x, proposals=None, ssl=False):
+    def forward(self, x, audio_x, proposals=None, ssl=False):
         # x should be [B, C, 256, 96, 96] for THUMOS14
         feat_dict = self.backbone(x)
+
         if ssl:
             top_feat = self.coarse_pyramid_detection(feat_dict, ssl)
             decoded_segments = proposals[0].unsqueeze(0)
@@ -431,8 +552,8 @@ class BDNet(nn.Module):
             return anchor, positive, negative
         else:
             loc, conf, prop_loc, prop_conf, center, priors, start, end, \
-            start_loc_prop, end_loc_prop, start_conf_prop, end_conf_prop = \
-                self.coarse_pyramid_detection(feat_dict)
+                start_loc_prop, end_loc_prop, start_conf_prop, end_conf_prop = \
+                self.coarse_pyramid_detection(feat_dict, audio_x)
             return {
                 'loc': loc,
                 'conf': conf,

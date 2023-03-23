@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import tqdm
 import numpy as np
 from AFSD.common.thumos_dataset import THUMOS_Dataset, get_video_info, \
-    load_video_data, detection_collate, get_video_anno
+    load_video_data, detection_collate, get_video_anno,load_audio_data
 from torch.utils.data import DataLoader
 from AFSD.thumos14.BDNet import BDNet
 from AFSD.thumos14.multisegment_loss import MultiSegmentLoss
@@ -59,7 +59,7 @@ def worker_init_fn(worker_id):
     set_seed(GLOBAL_SEED + worker_id)
 
 
-def get_rng_states():
+def get_rng_states():#random number generater
     states = []
     states.append(random.getstate())
     states.append(np.random.get_state())
@@ -110,18 +110,20 @@ def calc_bce_loss(start, end, scores):
     return loss_start, loss_end
 
 
-def forward_one_epoch(net, clips, targets, scores=None, training=True, ssl=True):
+def forward_one_epoch(net, clips,audio_clips, targets, scores=None, training=True, ssl=False):
+
     clips = clips.cuda()
+    audio_clips.cuda()
     targets = [t.cuda() for t in targets]
 
     if training:
         if ssl:
             output_dict = net.module(clips, proposals=targets, ssl=ssl)
         else:
-            output_dict = net(clips, ssl=False)
+            output_dict = net(clips, audio_clips,ssl=False)
     else:
         with torch.no_grad():
-            output_dict = net(clips)
+            output_dict = net(clips , audio_clips)
 
     if ssl:
         anchor, positive, negative = output_dict
@@ -167,10 +169,10 @@ def run_one_epoch(epoch, net, optimizer, data_loader, epoch_step_num, training=T
     loss_contras_val = 0
     cost_val = 0
     with tqdm.tqdm(data_loader, total=epoch_step_num, ncols=0) as pbar:
-        for n_iter, (clips, targets, scores, ssl_clips, ssl_targets, flags) in enumerate(pbar):
+        for n_iter, (clips , audio_clips, targets, scores, ssl_clips, ssl_targets, flags) in enumerate(pbar):
             loss_l, loss_c, loss_prop_l, loss_prop_c, \
             loss_ct, loss_start, loss_end = forward_one_epoch(
-                net, clips, targets, scores, training=training, ssl=False)
+                net, clips,audio_clips, targets, scores, training=training, ssl=False)
 
             loss_l = loss_l * config['training']['lw']
             loss_c = loss_c * config['training']['cw']
@@ -178,7 +180,6 @@ def run_one_epoch(epoch, net, optimizer, data_loader, epoch_step_num, training=T
             loss_prop_c = loss_prop_c * config['training']['cw']
             loss_ct = loss_ct * config['training']['cw']
             cost = loss_l + loss_c + loss_prop_l + loss_prop_c + loss_ct + loss_start + loss_end
-
             ssl_count = 0
             loss_trip = 0
             for i in range(len(flags)):
@@ -187,9 +188,13 @@ def run_one_epoch(epoch, net, optimizer, data_loader, epoch_step_num, training=T
                                                    training=training, ssl=True) * config['training']['ssl']
                     loss_trip_val += loss_trip.cpu().detach().numpy()
                     ssl_count += 1
+
+
             if ssl_count:
                 loss_trip_val /= ssl_count
                 loss_trip /= ssl_count
+
+
             cost = cost + loss_trip
             if training:
                 optimizer.zero_grad()
@@ -260,13 +265,16 @@ if __name__ == '__main__':
     train_video_infos = get_video_info(config['dataset']['training']['video_info_path'])
     train_video_annos = get_video_anno(train_video_infos,
                                        config['dataset']['training']['video_anno_path'])
-    train_data_dict = load_video_data(train_video_infos,
+    train_video_data_dict = load_video_data(train_video_infos,
                                       config['dataset']['training']['video_data_path'])
-    train_dataset = THUMOS_Dataset(train_data_dict,
+
+    train_audio_data_dict = load_audio_data(train_video_infos,
+                                      config['dataset']['training']['audio_data_path'])
+    train_dataset = THUMOS_Dataset(train_video_data_dict,train_audio_data_dict,
                                    train_video_infos,
                                    train_video_annos)
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                                   num_workers=4, worker_init_fn=worker_init_fn,
+                                   num_workers=0, worker_init_fn=worker_init_fn,
                                    collate_fn=detection_collate, pin_memory=True, drop_last=True)
     epoch_step_num = len(train_dataset) // batch_size
 

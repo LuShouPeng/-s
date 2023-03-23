@@ -113,6 +113,7 @@ class InceptionModule(nn.Module):
                           name=name + '/Branch_3/Conv3d_0b_1x1')
         self.name = name
 
+
     def forward(self, x):
         b0 = self.b0(x)
         b1 = self.b1b(self.b1a(x))

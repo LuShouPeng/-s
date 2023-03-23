@@ -2,7 +2,7 @@
 .idea/*
 models/*
 output/*
-datasets/*
+AFSD/thumos14/datasets/*
 cuhk-val/*
 
 # ignored files
