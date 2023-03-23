@@ -248,7 +248,7 @@ class THUMOS_Dataset(Dataset):
         video_data = self.video_data_dict[sample_info['video_name']]
         print(sample_info['video_name'])
         audio_data = self.audio_data_dict[sample_info['video_name']]
-        # T x F
+        #  audio_data:FxT e.g(128,3079)
         offset = sample_info['offset']
         annos = sample_info['annos']
         th = self.th[sample_info['video_name']]
@@ -256,7 +256,7 @@ class THUMOS_Dataset(Dataset):
         input_video_data = video_data[:, offset: offset + self.clip_length]
         input_audio_data = audio_data[:, offset: offset + self.clip_length]
         c, t, h, w = input_video_data.shape
-        at, af = input_audio_data.shape
+        af, at = input_audio_data.shape
         if t < self.clip_length:
             # padding t to clip_length
             pad_t = self.clip_length - t
@@ -264,8 +264,8 @@ class THUMOS_Dataset(Dataset):
             input_video_data = np.concatenate([input_video_data, zero_clip], 1)
 
         if at < self.clip_length:
-            pad_t = self.clip_length - t
-            zero_clip = np.zeros([pad_t, af], input_audio_data.dtype)
+            pad_t = self.clip_length - at
+            zero_clip = np.zeros([af, pad_t], input_audio_data.dtype)
             input_audio_data = np.concatenate([input_audio_data, zero_clip], 1)
 
         # random crop and flip
