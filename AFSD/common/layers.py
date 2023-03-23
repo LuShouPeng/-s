@@ -65,6 +65,24 @@ class TransposedConv1d(nn.Module):
         return x
 
 
+class AudioMaxpool1D(nn.Module):
+    def __init__(self,
+                 out_channels,
+                 kernel_size,
+                 ):
+        super(AudioMaxpool1D, self).__init__()
+        self.maxpool = nn.MaxPool1d(kernel_size=kernel_size)
+        self.gn = nn.GroupNorm(8, out_channels)
+        self.ru = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x = self.maxpool(x)
+        x = self.gn(x.permute(0,2,1))
+        x = self.ru(x)
+
+        return x
+
+
 class TransposedConv3d(nn.Module):
     def __init__(self, in_channels,
                  output_channels,

@@ -6,7 +6,7 @@ import numpy as np
 
 from AFSD.common.i3d_backbone import InceptionI3d
 from AFSD.common.config import config
-from AFSD.common.layers import Unit1D, Unit3D
+from AFSD.common.layers import Unit1D, Unit3D, AudioMaxpool1D
 from AFSD.prop_pooling.boundary_pooling_op import BoundaryMaxPooling
 
 num_classes = config['dataset']['num_classes']
@@ -281,20 +281,19 @@ class CoarsePyramid(nn.Module):
             )
             t = t // 2
 
-        self.audio_conv2 = self.audio_conv = nn.Sequential(
-            nn.Conv1d(in_channels=64, out_channels=64, kernel_size=3),
-            nn.MaxPool1d(kernel_size=2),
-            nn.GroupNorm(8, 32),
-            nn.ReLU(inplace=True)
-        )
+        self.audio_conv2 = AudioMaxpool1D(32, 2)
 
-        self.audio_conv = nn.Sequential(
-            nn.Conv1d(in_channels=128, out_channels=128, kernel_size=3, padding=1),
-            nn.MaxPool1d(kernel_size=4),
-            nn.GroupNorm(8, 64),
-            nn.ReLU(inplace=True)
+        # nn.Sequential(
+        #     nn.MaxPool1d(kernel_size=2),
+        #     nn.GroupNorm(8, 32),
+        #     nn.ReLU(inplace=True)
+        # )
 
-        )
+        self.audio_conv = AudioMaxpool1D(64, 4)
+        # nn.Sequential(
+        # nn.MaxPool1d(kernel_size=4),
+        # nn.GroupNorm(8, 64),
+        # nn.ReLU(inplace=True)
 
         self.audio_tconv = nn.Sequential(
             nn.Conv1d(in_channels=256, out_channels=64, kernel_size=1),
@@ -359,8 +358,8 @@ class CoarsePyramid(nn.Module):
                     x = x.squeeze(-1).squeeze(-1)
                     # x (1,512,64)
                     audioF = torch.zeros(x.shape[0], x.shape[1], 64).cuda()
-                    audio_features = self.audio_conv(audio_features.permute(0, 2, 1))
-                    audioF[:, :128, :] = audio_features.permute(0, 2, 1).unsqueeze(0)
+                    audio_features = self.audio_conv(audio_features)
+                    audioF[:, :128, :] = audio_features.permute(0, 2, 1)
                     # audioF (1,512,64)
                     x = self.TBMRF_block(audioF, x, 1, 1)
                 elif i == 1:
