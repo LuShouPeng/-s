@@ -265,7 +265,7 @@ class THUMOS_Dataset(Dataset):
 
         if at < self.clip_length:
             pad_t = self.clip_length - t
-            zero_clip = np.zeros([at, pad_t], input_audio_data.dtype)
+            zero_clip = np.zeros([pad_t, af], input_audio_data.dtype)
             input_audio_data = np.concatenate([input_audio_data, zero_clip], 1)
 
         # random crop and flip

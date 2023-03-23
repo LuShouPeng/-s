@@ -309,13 +309,10 @@ class CoarsePyramid(nn.Module):
                 audio_residual = audio
                 a = self.U_a(audio)
                 merged = torch.mul(v + a, 0.5)
-
                 a_trans = audio_residual
                 v_trans = video_residual
-
                 video = nn.Tanh()(a_trans + merged)
                 audio = nn.Tanh()(v_trans + merged)
-
             return torch.mul(video + audio, 0.5)
         else:
             for i in range(nb_block):
@@ -324,10 +321,8 @@ class CoarsePyramid(nn.Module):
                 audio_residual = audio
                 a = self.U_a2(audio)
                 merged = torch.mul(v + a, 0.5)
-
                 a_trans = audio_residual
                 v_trans = video_residual
-
                 video = nn.Tanh()(a_trans + merged)
                 audio = nn.Tanh()(v_trans + merged)
 

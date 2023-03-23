@@ -30,8 +30,10 @@ rgb_data_path = config['testing'].get('rgb_data_path',
                                       './datasets/thumos14/test_npy/')
 flow_data_path = config['testing'].get('flow_data_path',
                                        './datasets/thumos14/test_flow_npy/')
+audio_data_path = config['testing'].get('audio_data_path',
+                                        './datasets/thumos14/Audio_feat_numpy/')
 rgb_checkpoint_path = config['testing'].get('rgb_checkpoint_path',
-                                            './models/thumos14/checkpoint-15.ckpt')
+                                            './models/thumos14/checkpoint-4.ckpt')
 flow_checkpoint_path = config['testing'].get('flow_checkpoint_path',
                                              './models/thumos14_flow/checkpoint-16.ckpt')
 
@@ -39,7 +41,8 @@ if __name__ == '__main__':
     video_infos = get_video_info(config['dataset']['testing']['video_info_path'])
     originidx_to_idx, idx_to_class = get_class_index_map()
 
-    npy_data_path = config['dataset']['testing']['video_data_path']
+    video_npy_data_path = config['dataset']['testing']['video_data_path']
+    audio_npy_data_path = config['dataset']['testing']['audio_data_path']
     if fusion:
         rgb_net = BDNet(in_channels=3, training=False)
         flow_net = BDNet(in_channels=2, training=False)
@@ -74,10 +77,14 @@ if __name__ == '__main__':
             if (sample_count - clip_length) % stride:
                 offsetlist += [sample_count - clip_length]
 
-        data = np.load(os.path.join(npy_data_path, video_name + '.npy'))
-        data = np.transpose(data, [3, 0, 1, 2])
-        data = centor_crop(data)
-        data = torch.from_numpy(data)
+        video_data = np.load(os.path.join(video_npy_data_path, video_name + '.npy'))
+        audio_data = np.load(os.path.join(audio_npy_data_path, video_name + '.npy'))
+        video_data = np.transpose(video_data, [3, 0, 1, 2])
+        video_data = centor_crop(video_data)
+        video_data = torch.from_numpy(video_data)
+
+        audio_data = np.transpose(audio_data, [1,0])
+        audio_data = torch.from_numpy(audio_data)
 
         if fusion:
             flow_data = np.load(os.path.join(flow_data_path, video_name + '.npy'))
@@ -90,20 +97,33 @@ if __name__ == '__main__':
             output.append([])
         res = torch.zeros(num_classes, top_k, 3)
 
-        # print(video_name)
+        print(video_name)
         for offset in offsetlist:
-            clip = data[:, offset: offset + clip_length]
-            clip = clip.float()
-            clip = (clip / 255.0) * 2.0 - 1.0
+            video_clip = video_data[:, offset: offset + clip_length]
+            video_clip = video_clip.float()
+            video_clip = (video_clip / 255.0) * 2.0 - 1.0
+
+
+            audio_clip = audio_data[:, offset: offset + clip_length]
+            audio_clip = audio_clip.float()
+            # audio_clip = (audio_clip / 255.0) * 2.0 - 1.0
+
             if fusion:
                 flow_clip = flow_data[:, offset: offset + clip_length]
                 flow_clip = flow_clip.float()
                 flow_clip = (flow_clip / 255.0) * 2.0 - 1.0
             # clip = torch.from_numpy(clip).float()
-            if clip.size(1) < clip_length:
-                tmp = torch.zeros([clip.size(0), clip_length - clip.size(1),
+            if video_clip.size(1) < clip_length:
+                tmp = torch.zeros([video_clip.size(0), clip_length - video_clip.size(1),
                                    96, 96]).float()
-                clip = torch.cat([clip, tmp], dim=1)
+                video_clip = torch.cat([video_clip, tmp], dim=1)
+
+            if audio_clip.size(1) < clip_length:
+                tmp = torch.zeros([video_clip.size(0), clip_length - video_clip.size(1),
+                                   96, 96]).float()
+                clip = torch.cat([video_clip, tmp], dim=1)
+
+
             clip = clip.unsqueeze(0).cuda()
             if fusion:
                 if flow_clip.size(1) < clip_length:
@@ -120,6 +140,7 @@ if __name__ == '__main__':
             loc, conf, priors = output_dict['loc'], output_dict['conf'], output_dict['priors'][0]
             prop_loc, prop_conf = output_dict['prop_loc'], output_dict['prop_conf']
             center = output_dict['center']
+
             if fusion:
                 rgb_conf = conf[0]
                 rgb_loc = loc[0]
@@ -128,7 +149,7 @@ if __name__ == '__main__':
                 rgb_center = center[0]
 
                 loc, conf, priors = flow_output_dict['loc'], flow_output_dict['conf'], \
-                                    flow_output_dict['priors'][0]
+                    flow_output_dict['priors'][0]
                 prop_loc, prop_conf = flow_output_dict['prop_loc'], flow_output_dict['prop_conf']
                 center = flow_output_dict['center']
 
