@@ -366,8 +366,8 @@ class CoarsePyramid(nn.Module):
                     x = conv(x2)
                     x = x.squeeze(-1).squeeze(-1)
                     audioF = torch.zeros(x.shape[0], x.shape[1], 32).cuda()
-                    audio_features = self.audio_conv2(audio_features)
-                    audioF[:, :128, :] = audio_features.permute(0, 2, 1).unsqueeze(0)
+                    audio_features = self.audio_conv2(audio_features.permute(0, 2, 1))
+                    audioF[:, :128, :] = audio_features.permute(0, 2, 1)
                     x = self.TBMRF_block(audioF, x, 1, 2)
                     x0 = pyramid_feats[-1]
                     y = F.interpolate(x, x0.size()[2:], mode='nearest')
