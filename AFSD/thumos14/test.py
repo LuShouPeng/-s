@@ -83,7 +83,7 @@ if __name__ == '__main__':
         video_data = centor_crop(video_data)
         video_data = torch.from_numpy(video_data)
 
-        audio_data = np.transpose(audio_data, [1,0])
+        audio_data = np.transpose(audio_data, [1, 0])
         audio_data = torch.from_numpy(audio_data)
 
         if fusion:
@@ -103,7 +103,6 @@ if __name__ == '__main__':
             video_clip = video_clip.float()
             video_clip = (video_clip / 255.0) * 2.0 - 1.0
 
-
             audio_clip = audio_data[:, offset: offset + clip_length]
             audio_clip = audio_clip.float()
             # audio_clip = (audio_clip / 255.0) * 2.0 - 1.0
@@ -117,14 +116,13 @@ if __name__ == '__main__':
                 tmp = torch.zeros([video_clip.size(0), clip_length - video_clip.size(1),
                                    96, 96]).float()
                 video_clip = torch.cat([video_clip, tmp], dim=1)
-
+            # audio (128,3079)
             if audio_clip.size(1) < clip_length:
-                tmp = torch.zeros([video_clip.size(0), clip_length - video_clip.size(1),
-                                   96, 96]).float()
-                clip = torch.cat([video_clip, tmp], dim=1)
+                tmp = torch.zeros([audio_clip.size(0), clip_length - audio_clip.size(1)]).float()
+                audio_clip = torch.cat([audio_clip, tmp], dim=1)
 
-
-            clip = clip.unsqueeze(0).cuda()
+            video_clip = video_clip.unsqueeze(0).cuda()
+            audio_clip = audio_clip.unsqueeze(0).cuda()
             if fusion:
                 if flow_clip.size(1) < clip_length:
                     tmp = torch.zeros([flow_clip.size(0), clip_length - flow_clip.size(1),
@@ -133,7 +131,7 @@ if __name__ == '__main__':
                 flow_clip = flow_clip.unsqueeze(0).cuda()
 
             with torch.no_grad():
-                output_dict = net(clip)
+                output_dict = net(video_clip,audio_clip)
                 if fusion:
                     flow_output_dict = flow_net(flow_clip)
 
