@@ -33,7 +33,7 @@ flow_data_path = config['testing'].get('flow_data_path',
 audio_data_path = config['testing'].get('audio_data_path',
                                         './datasets/thumos14/Audio_feat_numpy/')
 rgb_checkpoint_path = config['testing'].get('rgb_checkpoint_path',
-                                            './models/thumos14/checkpoint-4.ckpt')
+                                            './models/thumos14/checkpoint-3.ckpt')
 flow_checkpoint_path = config['testing'].get('flow_checkpoint_path',
                                              './models/thumos14_flow/checkpoint-16.ckpt')
 
