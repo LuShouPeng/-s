@@ -1,6 +1,6 @@
 # ignored folders
 .idea/*
-models/*
+models/thumos14/*
 output/*
 AFSD/thumos14/datasets/*
 cuhk-val/*
